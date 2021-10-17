@@ -1,0 +1,28 @@
+trigger:
+  branches:
+    include:
+      - "*"
+  paths:
+    include:
+      - azdevops
+    exclude:
+      - README.md
+      - CHANGELOG.md
+      - Makefile
+
+variables:
+  - group: common-vars
+    
+pool:
+  vmImage: $(POOL_IMAGE)
+
+stages:
+  - stage: main
+    displayName: main
+    jobs:
+      - template: ../templates/job-azdevops-terraform-deploy.yml
+        parameters:
+          path: azdevops
+          jobName: Build_World_Job
+          awsConnection: AWS_CONNECTION
+          environment: The World - Prod

@@ -1,0 +1,117 @@
+# Require following variable
+# TF_BACKEND_S3_BUCKET : Backend name for Terraform S3 Backend
+# TF_BACKEND_S3_DYNAMODB_TABLE : Backend name for Terraform S3 Backend
+# TF_BACKEND_S3_REGION : AWS region for Terraform S3 Backend
+parameters:
+  # Path for terraform directory
+  - name: "path"
+    type: string
+    default: ""
+  # Terraform version to use, default use TF_VERSION variable
+  - name: "tf_version"
+    type: string
+    default: $(TF_VERSION)
+  # Job Name for reference
+  - name: "jobName"
+    type: string
+    default: ""
+  # AWS Connection Name for Terraform Backend
+  - name: "awsConnection"
+    type: string
+  - name: "deployCondition"
+    default: |
+      or(
+        and(eq(variables['PLAN_CODE'], '2'), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['DESTROY'], True)), 
+        eq(variables['TEST_PIPELINE'], True)
+        )
+    type: string
+  - name: "destroyCondition"
+    default: |
+      or(
+        and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['DESTROY'], True)), 
+        and(eq(variables['TEST_PIPELINE'], True), eq(variables['DESTROY'], True))
+        )
+    type: string
+  # Environment Name that use to record
+  - name: "environment"
+    type: string
+  # tf_input to add variable
+  - name: "tf_input"
+    type: object
+    default: null
+
+jobs:
+  - deployment: DeploymentJob
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    displayName: Provision Start for ${{ parameters.path }}
+    environment: ${{ parameters.environment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - script: echo Record env ${{ parameters.environment }}
+              
+  - job: ${{ parameters.jobName }}
+    displayName: Provision for ${{ parameters.path }}
+    steps:
+      - task: TerraformInstaller@0
+        displayName: Install Terrafrom ${{ parameters.tf_version }}
+        inputs:
+          terraformVersion: "${{ parameters.tf_version }}"
+      - script: echo "Path=${{ parameters.path }}, branch=${{ variables['Build.SourceBranch'] }}"
+        displayName: Info
+
+      # The validate pipeline always run to validate the terraform script
+      - task: AWSShellScript@1
+        inputs:
+          awsCredentials: ${{ parameters.awsConnection }}
+          regionName: $(TF_BACKEND_S3_REGION)
+          scriptType: "inline"
+          inlineScript: |
+            terraform -chdir=${{ parameters.path }} init \
+                -backend-config="bucket=$(TF_BACKEND_S3_BUCKET)" \
+                -backend-config="region=$(TF_BACKEND_S3_REGION)" \
+                -backend-config="dynamodb_table=$(TF_BACKEND_S3_DYNAMODB_TABLE)"
+            terraform -chdir=${{ parameters.path }} validate
+            terraform -chdir=${{ parameters.path }} plan -detailed-exitcode
+            echo $? > $(Pipeline.Workspace)/PLAN_CODE
+            echo "##vso[task.setvariable variable=PLAN_CODE]$(cat $(Pipeline.Workspace)/PLAN_CODE)"
+          disableAutoCwd: true
+          workingDirectory: "$(System.DefaultWorkingDirectory)"
+          failOnStandardError: true
+        env:
+          ${{ each v in parameters.tf_input }}:
+            ${{ v.key }}: ${{ v.value }}
+        displayName: Validate Terraform
+
+      # The deploy pipeline only run when it is main branch and there is changes in validate result
+      - task: AWSShellScript@1
+        inputs:
+          awsCredentials: ${{ parameters.awsConnection }}
+          regionName: $(TF_BACKEND_S3_REGION)
+          scriptType: "inline"
+          failOnStandardError: true
+          inlineScript: |
+            terraform -chdir=${{ parameters.path }} apply -auto-approve
+          workingDirectory: "$(System.DefaultWorkingDirectory)"
+        condition: "${{ parameters.deployCondition }}"
+        env:
+          ${{ each v in parameters.tf_input }}:
+            ${{ v.key }}: ${{ v.value }}
+        displayName: Deploy ${{ parameters.path }}
+
+      # The destroy pipeline only run with special condition
+      - task: AWSShellScript@1
+        inputs:
+          awsCredentials: ${{ parameters.awsConnection }}
+          regionName: $(TF_BACKEND_S3_REGION)
+          scriptType: "inline"
+          inlineScript: |
+            terraform -chdir=${{ parameters.path }} destroy -auto-approve
+          failOnStandardError: true
+          workingDirectory: "$(System.DefaultWorkingDirectory)"
+        condition: "${{ parameters.destroyCondition }}"
+        env:
+          ${{ each v in parameters.tf_input }}:
+            ${{ v.key }}: ${{ v.value }}
+        displayName: Destroy ${{ parameters.path }}

@@ -1,0 +1,105 @@
+parameters:
+  - name: "path"
+    type: string
+  - name: "node"
+    default: "$(NODE_BUILD_VERSION)"
+    type: string
+  - name: "serviceName"
+    type: string
+  - name: "dockerFile"
+    default: "Dockerfile"
+    type: string
+  - name: "dockerPublishCondition"
+    default: |
+      or(
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq(variables['TEST_PIPELINE'], True)
+        )
+    type: string
+  - name: "cacheNpmKey"
+    default: npm_cache
+    type: string
+  - name: "cacheNpmKeyPath"
+    default: |
+      **/package-lock.json,!**/node_modules/**/package-lock.json,!**/.*/**/package-lock.json
+    type: string
+  - name: "cacheNpmPath"
+    default: $(Pipeline.Workspace)/.npm
+    type: string
+
+steps:
+  - task: Cache@2
+    inputs:
+      key: '${{ parameters.cacheNpmKey }} | "$(Agent.OS)" | ${{ parameters.cacheNpmKeyPath }}'
+      restoreKeys: ${{ parameters.cacheNpmKey }} | "$(Agent.OS)"
+      path: ${{ parameters.cacheNpmPath }}
+    displayName: Cache NPM package
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "${{ parameters.node }}"
+    displayName: Install Node.js
+
+  - script: npm ci --cache ${{ parameters.cacheNpmPath }}
+    displayName: Npm install and build
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.path }}
+
+  - script: npm run lint
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.path }}
+    displayName: NPM lint
+
+  - script: npm test
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.path }}
+    displayName: NPM test
+
+  - task: PublishTestResults@2
+    inputs:
+      testRunner: JUnit
+      testResultsFiles: "**/TEST-RESULTS.xml"
+    displayName: Publish Test Result
+
+  - task: PublishCodeCoverageResults@1
+    inputs: 
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/*coverage.xml'
+      reportDirectory: '$(System.DefaultWorkingDirectory)/**/coverage'
+
+  - script: |
+      PACKAGE_VERSION=v$(cat package.json \
+        | grep version \
+        | head -1 \
+        | awk -F: '{ print $2 }' \
+        | sed 's/[", ]//g') 
+      echo $PACKAGE_VERSION
+      echo "##vso[task.setvariable variable=VERSION]$PACKAGE_VERSION"
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.path }}
+    displayName: Get Version
+
+  - task: Docker@2
+    condition: ${{ parameters.dockerPublishCondition }}
+    inputs:
+      command: "build"
+      Dockerfile: "${{ parameters.dockerFile }}"
+      buildContext: "$(Build.SourcesDirectory)/${{ parameters.path }}"
+      arguments: "-t ${{ parameters.serviceName }}"
+    displayName: Build Docker Image
+
+  - task: ECRPushImage@1
+    condition: ${{ parameters.dockerPublishCondition }}
+    inputs:
+      awsCredentials: "$(ECR_CONNECTION_NAME)"
+      regionName: "$(ECR_REGION_NAME)"
+      imageSource: "imagename"
+      sourceImageName: "${{ parameters.serviceName }}"
+      sourceImageTag: "latest"
+      repositoryName: "$(ECR_PROJECT_NAME)/${{ parameters.serviceName }}"
+      pushTag: "$(VERSION)"
+      autoCreateRepository: true
+      logRequest: true
+    displayName: Push Docker Image
+
+  - script: |
+      IMAGE_VERSION=$(docker inspect ${{ parameters.serviceName }} -f '{{json .RepoTags }}' | jq -r -c '.[] | select( contains("${{ parameters.serviceName }}:latest") | not)')
+      echo $IMAGE_VERSION
+      echo "##vso[task.setvariable variable=IMAGE_VERSION]$IMAGE_VERSION"
+    displayName: Save Image Version
