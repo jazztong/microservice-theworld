@@ -1,7 +1,7 @@
 variable "project_name" {
   type = string
   # Fill in your project name
-  #default = "<<Fill in your project name>>"
+  default = "Microservice-App"
 }
 
 variable "app_repo_input_url" {
