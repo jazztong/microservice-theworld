@@ -1,7 +1,7 @@
 variable "project_name" {
-  type = string
-  # Fill in your project name
-  default = "Microservice-App"
+  type        = string
+  description = "Fill in your project name, it must match the project name that run this pipeline"
+  default     = "Microservice-App"
 }
 
 variable "app_repo_input_url" {
