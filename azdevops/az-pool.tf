@@ -1,6 +1,5 @@
 resource "azuredevops_agent_pool" "pool" {
-  name           = "prod-demo-az-agent"
-  auto_provision = true
+  name = "prod-demo-az-agent"
 }
 
 resource "azuredevops_agent_queue" "queue" {
