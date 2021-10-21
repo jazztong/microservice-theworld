@@ -1,7 +1,7 @@
 // Create App Repo
 resource "azuredevops_git_repository" "app_repo" {
   project_id = local.project_id
-  name       = "TheApp"
+  name       = "microservice-theapp"
   initialization {
     init_type   = local.app_import ? "Import" : "Clean"
     source_type = local.app_import ? "Git" : null

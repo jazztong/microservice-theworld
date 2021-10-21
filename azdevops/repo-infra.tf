@@ -1,7 +1,7 @@
 // Create Infra Repo
 resource "azuredevops_git_repository" "infra_repo" {
   project_id = local.project_id
-  name       = "TheInfra"
+  name       = "microservice-theinfra"
   initialization {
     init_type   = local.infra_import ? "Import" : "Clean"
     source_type = local.infra_import ? "Git" : null
