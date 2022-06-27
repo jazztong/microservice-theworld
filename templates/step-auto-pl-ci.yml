@@ -14,13 +14,14 @@ steps:
         [string] $repoName = "${{ parameters.repoName }}"
         [string] $filePath = "${{ parameters.filePath }}"
         [string] $fileContent = "${{ parameters.fileContent }}"
+
         [string] $branchRef = 'heads/main'
         [string] $apiVersion = '5.1'
         [string] $commitComment = "Update Image Version"
         [int] $debugRequest = $false
         [string] $pullRequestTitle = "Auto pull request"
         [string] $pullRequestDesc = "Merge to main to update version"
-        
+
         function DebugLog {
           param (
             [Parameter(Mandatory = $true)][string] $requestUrl,
@@ -66,6 +67,7 @@ steps:
         $headers.Add("Content-Type", "application/json")
         # Find repo ID
         $url = "$invokeURI/_apis/git/repositories?api-version=$apiVersion"
+        Write-Host $url
         $response = Invoke-RestMethod $url -Method 'GET' -Headers $headers
         DebugLog $url $null $response
 
@@ -82,20 +84,30 @@ steps:
         if ($response.count -eq 0) { Write-Host "Unable to find ref $branchRef"; return }
         $objectId = $response.value[0].objectId
         Write-Host "Branch Object Id = $objectId"
+
+        # Find if file exist
+        $changeType = "edit"
+        try {
+          $url = "$invokeURI/_apis/git/repositories/$repoID/items?path=$filePath&api-version=$apiVersion"
+          $response = Invoke-RestMethod $url -Method 'GET' -Headers $headers
+          DebugLog $url $null $response
+        }
+        catch {
+          # File not exist
+          $changeType = "add"
+        }
+        Write-Host "File commit type = $changeType"
         $body = @"
         {
           "refUpdates": [
-            {
-              "name": "refs/heads/$PullRequestBranch",
-              "oldObjectId": "$objectId"
-            }
+            {"name": "refs/heads/$PullRequestBranch","oldObjectId": "$objectId"}
           ],
           "commits": [
             {
               "comment": "$commitComment",
               "changes": [
                 {
-                  "changeType": "add",
+                  "changeType": "$changeType",
                   "item": {
                     "path": "$filePath"
                   },
